@@ -10,7 +10,7 @@ from .parser import ConfigParser, ProxyConfig
 
 class ConfigSourceManager:
     SOURCES = [
-        "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt",
+        "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/all_extracted_configs.txt",
     ]
 
     def __init__(self, timeout: float = 30.0):
