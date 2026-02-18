@@ -34,15 +34,13 @@ class XrayConfigBuilder:
 
         outbound = XrayConfigBuilder._build_outbound(proxy)
 
-        # Set log.level to "none" for completely quiet logging (Xray 1.8+ prefers "none" over "error")
+        # Remove geoip:private rule to prevent Xray from requiring geoip.dat and failing early.
         return {
             "log": {"loglevel": "none"},
             "inbounds": [inbound],
             "outbounds": [outbound, {"protocol": "freedom", "tag": "direct"}],
             "routing": {
-                "rules": [
-                    {"type": "field", "outboundTag": "direct", "ip": ["geoip:private"]}
-                ]
+                "rules": []
             }
         }
 
