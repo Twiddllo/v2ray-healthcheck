@@ -248,17 +248,20 @@ class XrayValidator:
             time.sleep(2.0)
 
             if process.poll() is not None:
-                # Process exited early; print output for debugging.
+                # Process exited early; print output for debugging
                 stdout_output = process.stdout.read().decode(errors="ignore") if process.stdout else ""
                 stderr_output = process.stderr.read().decode(errors="ignore") if process.stderr else ""
-                print("Xray exited early!")
-                if stdout_output.strip():
+                if stdout_output.strip() or stderr_output.strip():
                     print("---- STDOUT ----")
-                    print(stdout_output)
-                if stderr_output.strip():
-                    print("---- STDERR ----")
-                    print(stderr_output)
-                print("----------------")
+                    if stdout_output.strip():
+                        print(stdout_output)
+                    if stderr_output.strip():
+                        print(stderr_output)
+                    print("----------------")
+                print("Xray exited early!")
+                # Special handling for missing geoip.dat: if error references geoip.dat missing, just treat as early exit.
+                if "geoip.dat" in stdout_output or "geoip.dat" in stderr_output:
+                    return False, -1
                 return False, -1
 
             latency = self._test_through_proxy('127.0.0.1', local_port)
@@ -271,15 +274,21 @@ class XrayValidator:
                 process.kill()
                 stdout_output, stderr_output = process.communicate()
 
-            # Decode outputs for logging
-            decoded_stderr = stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes) else (stderr_output or "")
-            decoded_stdout = stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes) else (stdout_output or "")
-            if decoded_stdout.strip():
+            decoded_stderr = (
+                stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes)
+                else (stderr_output or "")
+            )
+            decoded_stdout = (
+                stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes)
+                else (stdout_output or "")
+            )
+            if decoded_stdout.strip() or decoded_stderr.strip():
                 print("---- STDOUT ----")
-                print(decoded_stdout)
-            if decoded_stderr.strip():
-                print("---- STDERR ----")
-                print(decoded_stderr)
+                if decoded_stdout.strip():
+                    print(decoded_stdout)
+                if decoded_stderr.strip():
+                    print(decoded_stderr)
+                print("----------------")
 
             if latency <= 0:
                 print("Xray failed to proxy request (latency <= 0).")
@@ -295,14 +304,21 @@ class XrayValidator:
                     pass
                 try:
                     stdout_output, stderr_output = process.communicate(timeout=1)
-                    decoded_stderr = stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes) else (stderr_output or "")
-                    decoded_stdout = stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes) else (stdout_output or "")
-                    if decoded_stdout.strip():
+                    decoded_stderr = (
+                        stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes)
+                        else (stderr_output or "")
+                    )
+                    decoded_stdout = (
+                        stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes)
+                        else (stdout_output or "")
+                    )
+                    if decoded_stdout.strip() or decoded_stderr.strip():
                         print("---- STDOUT ----")
-                        print(decoded_stdout)
-                    if decoded_stderr.strip():
-                        print("---- STDERR ----")
-                        print(decoded_stderr)
+                        if decoded_stdout.strip():
+                            print(decoded_stdout)
+                        if decoded_stderr.strip():
+                            print(decoded_stderr)
+                        print("----------------")
                 except Exception:
                     pass
             return False, -1
