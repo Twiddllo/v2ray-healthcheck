@@ -1,6 +1,10 @@
 name: V2Ray Config Check
 
 on:
+  push:
+    branches:
+      - main
+      - master
   schedule:
     - cron: '*/20 * * * *'
   workflow_dispatch:
