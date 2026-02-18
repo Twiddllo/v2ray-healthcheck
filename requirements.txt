@@ -1,0 +1,2 @@
+# V2Ray Config Checker
+# No external dependencies - uses only Python standard library
