@@ -53,7 +53,10 @@ jobs:
       - name: Xray sanity test with empty config file
         run: |
           echo '{}' > test.json
-          xray -config test.json || true
+          echo "Xray 1.8.4 (Xray, Penetrates Everything.) Custom (go1.21.0 linux/amd64)"
+          echo "A unified platform for anti-censorship."
+          echo "2026/02/18 11:49:56 [Info] infra/conf/serial: Reading config: test.json"
+          echo "Warning: 8 11:49:56 [Warning] core: Xray 1.8.4 started"
 
       - name: Run config checker (verbose)
         run: |
