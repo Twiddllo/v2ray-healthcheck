@@ -11,6 +11,9 @@ from typing import Tuple, Optional
 import ssl
 from .parser import ProxyConfig
 
+# Most of the code remains the same, but ensure log.level is set to "none" for Xray >=1.8+,
+# so that warning/info messages don't clutter the output or cause confusion in CI.
+# Xray's logging format changed in newer versions and "none" disables normal output.
 
 class XrayConfigBuilder:
     @staticmethod
@@ -31,8 +34,9 @@ class XrayConfigBuilder:
 
         outbound = XrayConfigBuilder._build_outbound(proxy)
 
+        # Set log.level to "none" for completely quiet logging (Xray 1.8+ prefers "none" over "error")
         return {
-            "log": {"loglevel": "error"},
+            "log": {"loglevel": "none"},
             "inbounds": [inbound],
             "outbounds": [outbound, {"protocol": "freedom", "tag": "direct"}],
             "routing": {
@@ -230,8 +234,7 @@ class XrayValidator:
         try:
             with os.fdopen(config_fd, 'w') as f:
                 json.dump(config, f)
-            
-            # Start Xray process - always use universal_newlines for easier debugging (Py3.7+)
+
             popen_args = {
                 "args": [self.xray_path, '-c', config_path],
                 "stdout": subprocess.PIPE,
@@ -241,8 +244,8 @@ class XrayValidator:
                 popen_args["creationflags"] = subprocess.CREATE_NO_WINDOW
             process = subprocess.Popen(**popen_args)
 
-            # Wait a bit for Xray to start up.
-            time.sleep(1.0)
+            # Wait for Xray to start up (increase, some images on CI may be slower)
+            time.sleep(2.0)
 
             if process.poll() is not None:
                 # Process exited early; print output for debugging.
@@ -268,7 +271,7 @@ class XrayValidator:
                 process.kill()
                 stdout_output, stderr_output = process.communicate()
 
-            # Decode outputs for logging (always print for easier debugging)
+            # Decode outputs for logging
             decoded_stderr = stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes) else (stderr_output or "")
             decoded_stdout = stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes) else (stdout_output or "")
             if decoded_stdout.strip():
@@ -277,7 +280,7 @@ class XrayValidator:
             if decoded_stderr.strip():
                 print("---- STDERR ----")
                 print(decoded_stderr)
-            
+
             if latency <= 0:
                 print("Xray failed to proxy request (latency <= 0).")
 
@@ -285,7 +288,6 @@ class XrayValidator:
 
         except Exception as exc:
             print(f"Exception in test_config_with_xray: {exc}")
-            # If possible, capture and print process output for debugging.
             if process is not None:
                 try:
                     process.terminate()
@@ -310,19 +312,12 @@ class XrayValidator:
             except Exception:
                 pass
 
-
-
-
-
     def _find_free_port(self) -> int:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
         sock.close()
         return port
-
-
-    
 
     def _test_through_proxy(self, proxy_host: str, proxy_port: int) -> float:
         try:
