@@ -1,0 +1,59 @@
+name: V2Ray Config Check
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Xray
+        run: |
+          wget -q https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
+          unzip -q Xray-linux-64.zip -d /tmp/xray
+          sudo mv /tmp/xray/xray /usr/local/bin/
+          sudo chmod +x /usr/local/bin/xray
+          rm -f Xray-linux-64.zip
+          xray -version
+
+      - name: Run config checker
+        run: |
+          python v2ray_checker.py
+        continue-on-error: true
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if git diff --quiet result.txt; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure Git
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Commit and push
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          git add result.txt
+          git commit -m "Update V2Ray configs: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          git push origin main
+        continue-on-error: true
