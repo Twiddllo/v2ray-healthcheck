@@ -216,61 +216,100 @@ class XrayValidator:
         self.timeout = 10
 
     def test_config_with_xray(self, proxy: ProxyConfig) -> Tuple[bool, float]:
+        """
+        Attempts to run Xray with a built config and validates its ability to proxy traffic.
+
+        Returns:
+            tuple: (success: bool, latency: float)
+        """
+        local_port = self._find_free_port()
+        config = XrayConfigBuilder.build_config(proxy, local_port)
+
+        config_fd, config_path = tempfile.mkstemp(suffix='.json')
+        process = None
         try:
-            local_port = self._find_free_port()
-            config = XrayConfigBuilder.build_config(proxy, local_port)
+            with os.fdopen(config_fd, 'w') as f:
+                json.dump(config, f)
+            
+            # Start Xray process - always use universal_newlines for easier debugging (Py3.7+)
+            popen_args = {
+                "args": [self.xray_path, '-c', config_path],
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+            }
+            if os.name == 'nt':
+                popen_args["creationflags"] = subprocess.CREATE_NO_WINDOW
+            process = subprocess.Popen(**popen_args)
 
-            config_fd, config_path = tempfile.mkstemp(suffix='.json')
-            try:
-                with os.fdopen(config_fd, 'w') as f:
-                    json.dump(config, f)
+            # Wait a bit for Xray to start up.
+            time.sleep(1.0)
 
-
-
-
-                process = subprocess.Popen(
-                    [self.xray_path, '-c', config_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                )
-
-                time.sleep(0.5)
-
-                if process.poll() is not None:
-                    stderr_output = process.stderr.read().decode(errors="ignore")
-                    print("Xray exited early!")
+            if process.poll() is not None:
+                # Process exited early; print output for debugging.
+                stdout_output = process.stdout.read().decode(errors="ignore") if process.stdout else ""
+                stderr_output = process.stderr.read().decode(errors="ignore") if process.stderr else ""
+                print("Xray exited early!")
+                if stdout_output.strip():
+                    print("---- STDOUT ----")
+                    print(stdout_output)
+                if stderr_output.strip():
                     print("---- STDERR ----")
                     print(stderr_output)
-                    print("----------------")
-                    return False, -1
+                print("----------------")
+                return False, -1
 
-                latency = self._test_through_proxy('127.0.0.1', local_port)
+            latency = self._test_through_proxy('127.0.0.1', local_port)
 
-                # Always terminate cleanly
-                process.terminate()
+            # Always try to terminate the process gracefully.
+            process.terminate()
+            try:
+                stdout_output, stderr_output = process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout_output, stderr_output = process.communicate()
+
+            # Decode outputs for logging (always print for easier debugging)
+            decoded_stderr = stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes) else (stderr_output or "")
+            decoded_stdout = stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes) else (stdout_output or "")
+            if decoded_stdout.strip():
+                print("---- STDOUT ----")
+                print(decoded_stdout)
+            if decoded_stderr.strip():
+                print("---- STDERR ----")
+                print(decoded_stderr)
+            
+            if latency <= 0:
+                print("Xray failed to proxy request (latency <= 0).")
+
+            return latency > 0, latency
+
+        except Exception as exc:
+            print(f"Exception in test_config_with_xray: {exc}")
+            # If possible, capture and print process output for debugging.
+            if process is not None:
                 try:
-                    stdout_output, stderr_output = process.communicate(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    stdout_output, stderr_output = process.communicate()
-
-                if latency <= 0:
-                    print("Xray failed:")
-                    print(stderr_output.decode(errors="ignore"))
-
-                return latency > 0, latency
-
-
-
-            finally:
-                try:
-                    os.unlink(config_path)
+                    process.terminate()
                 except Exception:
                     pass
-
-        except Exception:
+                try:
+                    stdout_output, stderr_output = process.communicate(timeout=1)
+                    decoded_stderr = stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes) else (stderr_output or "")
+                    decoded_stdout = stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes) else (stdout_output or "")
+                    if decoded_stdout.strip():
+                        print("---- STDOUT ----")
+                        print(decoded_stdout)
+                    if decoded_stderr.strip():
+                        print("---- STDERR ----")
+                        print(decoded_stderr)
+                except Exception:
+                    pass
             return False, -1
+        finally:
+            try:
+                os.unlink(config_path)
+            except Exception:
+                pass
+
 
 
 
