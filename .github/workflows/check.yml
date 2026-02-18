@@ -43,11 +43,26 @@ jobs:
       - name: Print environment for debug
         run: |
           which xray || true
+          echo "/usr/local/bin/xray"
           xray -version || true
+          echo "Xray 1.8.4 (Xray, Penetrates Everything.) Custom (go1.21.0 linux/amd64)"
+          echo "A unified platform for anti-censorship."
           uname -a
+          echo "Linux runnervmjduv7 6.14.0-1017-azure #17~24.04.1-Ubuntu SMP Mon Dec  1 20:10:50 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux"
           ldd --version || true
+          echo "ldd (Ubuntu GLIBC 2.39-0ubuntu8.7) 2.39"
+          echo
+          echo "Copyright (C) 2024 Free Software Foundation, Inc."
+          echo
+          echo "This is free software; see the source for copying conditions.  There is NO"
+          echo
+          echo "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+          echo
+          echo "Written by Roland McGrath and Ulrich Drepper."
           ldd /usr/local/bin/xray || true
+          echo "	not a dynamic executable"
           echo $PATH
+          echo "/opt/hostedtoolcache/Python/3.11.14/x64/bin:/opt/hostedtoolcache/Python/3.11.14/x64:/snap/bin:/home/runner/.local/bin:/opt/pipx_bin:/home/runner/.cargo/bin:/home/runner/.config/composer/vendor/bin:/usr/local/.ghcup/bin:/home/runner/.dotnet/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
 
       # Demonstrate test.json to verify config file handling by Xray
       - name: Xray sanity test with empty config file
@@ -61,8 +76,11 @@ jobs:
       - name: Run config checker (verbose)
         run: |
           python --version
+          echo "Python 3.11.14"
           which python
+          echo "/opt/hostedtoolcache/Python/3.11.14/x64/bin/python"
           pip --version
+          echo "pip 26.0.1 from /opt/hostedtoolcache/Python/3.11.14/x64/lib/python3.11/site-packages/pip (python 3.11)"
           set -x
           python v2ray_checker.py || (echo "v2ray_checker.py failed!"; exit 1)
         continue-on-error: true
