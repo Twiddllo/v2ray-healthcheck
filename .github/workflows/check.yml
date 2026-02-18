@@ -25,23 +25,45 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Xray
+      - name: Install Xray (with debug)
         run: |
-          wget -q https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
-          unzip -q Xray-linux-64.zip -d /tmp/xray
+          set -x
+          wget https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip -O Xray-linux-64.zip
+          ls -lh Xray-linux-64.zip
+          unzip Xray-linux-64.zip -d /tmp/xray
+          ls -lh /tmp/xray/
+          file /tmp/xray/xray || true
+          ldd /tmp/xray/xray || true
           sudo mv /tmp/xray/xray /usr/local/bin/
           sudo chmod +x /usr/local/bin/xray
+          ls -lh /usr/local/bin/xray
+          /usr/local/bin/xray -version
           rm -f Xray-linux-64.zip
-          xray -version
 
-      - name: Run config checker
+      - name: Print environment for debug
         run: |
-          python v2ray_checker.py
+          which xray || true
+          xray -version || true
+          uname -a
+          ldd --version || true
+          ldd /usr/local/bin/xray || true
+          echo $PATH
+
+      - name: Run config checker (verbose)
+        run: |
+          python --version
+          which python
+          pip --version
+          set -x
+          python v2ray_checker.py || (echo "v2ray_checker.py failed!"; exit 1)
         continue-on-error: true
 
       - name: Check for changes
         id: check_changes
         run: |
+          set -x
+          git status
+          git diff result.txt || true
           if git diff --quiet result.txt; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
