@@ -238,9 +238,11 @@ class XrayValidator:
                 time.sleep(0.5)
 
                 if process.poll() is not None:
-                    stdout_output, stderr_output = process.communicate()
+                    stderr_output = process.stderr.read().decode(errors="ignore")
                     print("Xray exited early!")
-                    print(stderr_output.decode(errors="ignore"))
+                    print("---- STDERR ----")
+                    print(stderr_output)
+                    print("----------------")
                     return False, -1
 
                 latency = self._test_through_proxy('127.0.0.1', local_port)
