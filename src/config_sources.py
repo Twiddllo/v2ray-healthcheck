@@ -11,8 +11,6 @@ from .parser import ConfigParser, ProxyConfig
 class ConfigSourceManager:
     SOURCES = [
         "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt",
-        "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",
-        "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/all_extracted_configs.txt",
     ]
 
     def __init__(self, timeout: float = 30.0):
@@ -85,3 +83,4 @@ class ConfigSourceManager:
             return f"trojan:{config.password}:{config.server}:{config.port}:{config.network}:{config.path}:{config.sni}"
         else:
             return config.raw_config
+
