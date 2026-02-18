@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 from typing import Tuple, Optional
-
+import ssl
 from .parser import ProxyConfig
 
 
@@ -225,6 +225,9 @@ class XrayValidator:
                 with os.fdopen(config_fd, 'w') as f:
                     json.dump(config, f)
 
+
+
+
                 process = subprocess.Popen(
                     [self.xray_path, '-c', config_path],
                     stdout=subprocess.PIPE,
@@ -235,17 +238,28 @@ class XrayValidator:
                 time.sleep(0.5)
 
                 if process.poll() is not None:
+                    stdout_output, stderr_output = process.communicate()
+                    print("Xray exited early!")
+                    print(stderr_output.decode(errors="ignore"))
                     return False, -1
 
                 latency = self._test_through_proxy('127.0.0.1', local_port)
 
+                # Always terminate cleanly
                 process.terminate()
                 try:
-                    process.wait(timeout=3)
+                    stdout_output, stderr_output = process.communicate(timeout=3)
                 except subprocess.TimeoutExpired:
                     process.kill()
+                    stdout_output, stderr_output = process.communicate()
+
+                if latency <= 0:
+                    print("Xray failed:")
+                    print(stderr_output.decode(errors="ignore"))
 
                 return latency > 0, latency
+
+
 
             finally:
                 try:
@@ -256,12 +270,18 @@ class XrayValidator:
         except Exception:
             return False, -1
 
+
+
+
     def _find_free_port(self) -> int:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
         sock.close()
         return port
+
+
+    
 
     def _test_through_proxy(self, proxy_host: str, proxy_port: int) -> float:
         try:
@@ -271,43 +291,38 @@ class XrayValidator:
             sock.settimeout(self.timeout)
             sock.connect((proxy_host, proxy_port))
 
-            sock.sendall(bytes([0x05, 0x01, 0x00]))
-            response = sock.recv(2)
-            if response[0] != 0x05 or response[1] != 0x00:
+            # SOCKS5 greeting
+            sock.sendall(b"\x05\x01\x00")
+            if sock.recv(2) != b"\x05\x00":
                 sock.close()
                 return -1
 
-            target_addr = socket.getaddrinfo("www.google.com", 80, socket.AF_INET)[0][4][0]
-            request = bytes([0x05, 0x01, 0x00, 0x01]) + socket.inet_aton(target_addr) + struct.pack('>H', 80)
+            # CONNECT to example.com:443 using domain type
+            domain = b"example.com"
+            request = (
+                b"\x05\x01\x00\x03" +
+                bytes([len(domain)]) +
+                domain +
+                struct.pack(">H", 443)
+            )
             sock.sendall(request)
 
             response = sock.recv(10)
-            if response[1] != 0x00:
+            if len(response) < 2 or response[1] != 0x00:
                 sock.close()
                 return -1
 
-            http_request = "GET /generate_204 HTTP/1.1\r\nHost: www.google.com\r\nConnection: close\r\n\r\n"
-            sock.sendall(http_request.encode())
+            # Wrap in TLS
+            context = ssl.create_default_context()
+            tls_sock = context.wrap_socket(sock, server_hostname="example.com")
 
-            sock.settimeout(10)
-            response_data = b""
-            try:
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    response_data += chunk
-            except socket.timeout:
-                pass
+            # Force handshake
+            tls_sock.do_handshake()
 
-            sock.close()
+            tls_sock.close()
 
-            elapsed = (time.time() - start_time) * 1000
-
-            if b"204" in response_data or b"HTTP/1.1" in response_data:
-                return elapsed
-
-            return -1
+            return (time.time() - start_time) * 1000
 
         except Exception:
             return -1
+
