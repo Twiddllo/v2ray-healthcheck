@@ -8,12 +8,9 @@ import subprocess
 import tempfile
 import time
 from typing import Tuple, Optional
-import ssl
+
 from .parser import ProxyConfig
 
-# Most of the code remains the same, but ensure log.level is set to "none" for Xray >=1.8+,
-# so that warning/info messages don't clutter the output or cause confusion in CI.
-# Xray's logging format changed in newer versions and "none" disables normal output.
 
 class XrayConfigBuilder:
     @staticmethod
@@ -34,13 +31,14 @@ class XrayConfigBuilder:
 
         outbound = XrayConfigBuilder._build_outbound(proxy)
 
-        # Remove geoip:private rule to prevent Xray from requiring geoip.dat and failing early.
         return {
-            "log": {"loglevel": "none"},
+            "log": {"loglevel": "error"},
             "inbounds": [inbound],
             "outbounds": [outbound, {"protocol": "freedom", "tag": "direct"}],
             "routing": {
-                "rules": []
+                "rules": [
+                    {"type": "field", "outboundTag": "direct", "ip": ["geoip:private"]}
+                ]
             }
         }
 
@@ -218,113 +216,45 @@ class XrayValidator:
         self.timeout = 10
 
     def test_config_with_xray(self, proxy: ProxyConfig) -> Tuple[bool, float]:
-        """
-        Attempts to run Xray with a built config and validates its ability to proxy traffic.
-
-        Returns:
-            tuple: (success: bool, latency: float)
-        """
-        local_port = self._find_free_port()
-        config = XrayConfigBuilder.build_config(proxy, local_port)
-
-        config_fd, config_path = tempfile.mkstemp(suffix='.json')
-        process = None
         try:
-            with os.fdopen(config_fd, 'w') as f:
-                json.dump(config, f)
+            local_port = self._find_free_port()
+            config = XrayConfigBuilder.build_config(proxy, local_port)
 
-            popen_args = {
-                "args": [self.xray_path, '-c', config_path],
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-            }
-            if os.name == 'nt':
-                popen_args["creationflags"] = subprocess.CREATE_NO_WINDOW
-            process = subprocess.Popen(**popen_args)
+            config_fd, config_path = tempfile.mkstemp(suffix='.json')
+            try:
+                with os.fdopen(config_fd, 'w') as f:
+                    json.dump(config, f)
 
-            # Wait for Xray to start up (increase, some images on CI may be slower)
-            time.sleep(2.0)
+                process = subprocess.Popen(
+                    [self.xray_path, '-c', config_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
 
-            if process.poll() is not None:
-                # Process exited early; print output for debugging
-                stdout_output = process.stdout.read().decode(errors="ignore") if process.stdout else ""
-                stderr_output = process.stderr.read().decode(errors="ignore") if process.stderr else ""
-                if stdout_output.strip() or stderr_output.strip():
-                    print("---- STDOUT ----")
-                    if stdout_output.strip():
-                        print(stdout_output)
-                    if stderr_output.strip():
-                        print(stderr_output)
-                    print("----------------")
-                print("Xray exited early!")
-                # Special handling for missing geoip.dat: if error references geoip.dat missing, just treat as early exit.
-                if "geoip.dat" in stdout_output or "geoip.dat" in stderr_output:
+                time.sleep(0.5)
+
+                if process.poll() is not None:
                     return False, -1
-                return False, -1
 
-            latency = self._test_through_proxy('127.0.0.1', local_port)
+                latency = self._test_through_proxy('127.0.0.1', local_port)
 
-            # Always try to terminate the process gracefully.
-            process.terminate()
-            try:
-                stdout_output, stderr_output = process.communicate(timeout=3)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                stdout_output, stderr_output = process.communicate()
-
-            decoded_stderr = (
-                stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes)
-                else (stderr_output or "")
-            )
-            decoded_stdout = (
-                stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes)
-                else (stdout_output or "")
-            )
-            if decoded_stdout.strip() or decoded_stderr.strip():
-                print("---- STDOUT ----")
-                if decoded_stdout.strip():
-                    print(decoded_stdout)
-                if decoded_stderr.strip():
-                    print(decoded_stderr)
-                print("----------------")
-
-            if latency <= 0:
-                print("Xray failed to proxy request (latency <= 0).")
-
-            return latency > 0, latency
-
-        except Exception as exc:
-            print(f"Exception in test_config_with_xray: {exc}")
-            if process is not None:
+                process.terminate()
                 try:
-                    process.terminate()
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+                return latency > 0, latency
+
+            finally:
+                try:
+                    os.unlink(config_path)
                 except Exception:
                     pass
-                try:
-                    stdout_output, stderr_output = process.communicate(timeout=1)
-                    decoded_stderr = (
-                        stderr_output.decode(errors="ignore") if isinstance(stderr_output, bytes)
-                        else (stderr_output or "")
-                    )
-                    decoded_stdout = (
-                        stdout_output.decode(errors="ignore") if isinstance(stdout_output, bytes)
-                        else (stdout_output or "")
-                    )
-                    if decoded_stdout.strip() or decoded_stderr.strip():
-                        print("---- STDOUT ----")
-                        if decoded_stdout.strip():
-                            print(decoded_stdout)
-                        if decoded_stderr.strip():
-                            print(decoded_stderr)
-                        print("----------------")
-                except Exception:
-                    pass
+
+        except Exception:
             return False, -1
-        finally:
-            try:
-                os.unlink(config_path)
-            except Exception:
-                pass
 
     def _find_free_port(self) -> int:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -341,38 +271,43 @@ class XrayValidator:
             sock.settimeout(self.timeout)
             sock.connect((proxy_host, proxy_port))
 
-            # SOCKS5 greeting
-            sock.sendall(b"\x05\x01\x00")
-            if sock.recv(2) != b"\x05\x00":
+            sock.sendall(bytes([0x05, 0x01, 0x00]))
+            response = sock.recv(2)
+            if response[0] != 0x05 or response[1] != 0x00:
                 sock.close()
                 return -1
 
-            # CONNECT to example.com:443 using domain type
-            domain = b"example.com"
-            request = (
-                b"\x05\x01\x00\x03" +
-                bytes([len(domain)]) +
-                domain +
-                struct.pack(">H", 443)
-            )
+            target_addr = socket.getaddrinfo("www.google.com", 80, socket.AF_INET)[0][4][0]
+            request = bytes([0x05, 0x01, 0x00, 0x01]) + socket.inet_aton(target_addr) + struct.pack('>H', 80)
             sock.sendall(request)
 
             response = sock.recv(10)
-            if len(response) < 2 or response[1] != 0x00:
+            if response[1] != 0x00:
                 sock.close()
                 return -1
 
-            # Wrap in TLS
-            context = ssl.create_default_context()
-            tls_sock = context.wrap_socket(sock, server_hostname="example.com")
+            http_request = "GET /generate_204 HTTP/1.1\r\nHost: www.google.com\r\nConnection: close\r\n\r\n"
+            sock.sendall(http_request.encode())
 
-            # Force handshake
-            tls_sock.do_handshake()
+            sock.settimeout(10)
+            response_data = b""
+            try:
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    response_data += chunk
+            except socket.timeout:
+                pass
 
-            tls_sock.close()
+            sock.close()
 
-            return (time.time() - start_time) * 1000
+            elapsed = (time.time() - start_time) * 1000
+
+            if b"204" in response_data or b"HTTP/1.1" in response_data:
+                return elapsed
+
+            return -1
 
         except Exception:
             return -1
-
