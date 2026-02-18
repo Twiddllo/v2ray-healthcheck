@@ -12,7 +12,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -25,45 +25,40 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Xray (with debug)
+      - name: Install dependencies
         run: |
-          set -x
-          wget https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip -O Xray-linux-64.zip
-          ls -lh Xray-linux-64.zip
-          unzip Xray-linux-64.zip -d /tmp/xray
-          ls -lh /tmp/xray/
-          file /tmp/xray/xray || true
-          ldd /tmp/xray/xray || true
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Install Xray
+        run: |
+          wget -q https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
+          unzip -q Xray-linux-64.zip -d /tmp/xray
           sudo mv /tmp/xray/xray /usr/local/bin/
           sudo chmod +x /usr/local/bin/xray
-          ls -lh /usr/local/bin/xray
-          /usr/local/bin/xray -version
           rm -f Xray-linux-64.zip
+          xray -version
 
-      - name: Print environment for debug
+      - name: Test Xray manually
         run: |
-          which xray || true
-          xray -version || true
-          uname -a
-          ldd --version || true
-          ldd /usr/local/bin/xray || true
-          echo $PATH
+          echo '{}' > test.json
+          xray -c test.json || true
 
-      - name: Run config checker (verbose)
+      - name: Run V2Ray config checker
         run: |
-          python --version
-          which python
-          pip --version
-          set -x
-          python v2ray_checker.py || (echo "v2ray_checker.py failed!"; exit 1)
+          python v2ray_checker.py
         continue-on-error: true
+
+      - name: Upload failing configs for debug
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-configs
+          path: '*.json'
 
       - name: Check for changes
         id: check_changes
         run: |
-          set -x
-          git status
-          git diff result.txt || true
           if git diff --quiet result.txt; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
@@ -78,8 +73,9 @@ jobs:
 
       - name: Commit and push
         if: steps.check_changes.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git add result.txt
           git commit -m "Update V2Ray configs: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          git push origin main
-        continue-on-error: true
+          git push
