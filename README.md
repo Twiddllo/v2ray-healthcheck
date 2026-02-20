@@ -1,5 +1,11 @@
 # V2Ray Config Checker
 
+
+
+# NOT WORKING RN
+
+
+
 A production-ready Python tool for automatically validating V2Ray proxy configurations. Features a two-phase validation pipeline for maximum efficiency and accuracy.
 
 ## Features
