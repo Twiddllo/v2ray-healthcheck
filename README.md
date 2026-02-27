@@ -2,7 +2,7 @@
 
 
 
-# NOT WORKING RN
+CI/CD part is not working rn. im fixing so if you are reading this, wait few days.
 
 
 
