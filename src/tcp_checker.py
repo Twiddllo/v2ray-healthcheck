@@ -2,11 +2,12 @@
 
 import socket
 import ssl
-import struct
 import time
-from typing import Tuple
+from typing import List, Tuple
 
 from .parser import ProxyConfig
+
+_TLS_SECURITY = frozenset(('tls', 'xtls', 'reality'))
 
 
 class TCPPreChecker:
@@ -14,60 +15,85 @@ class TCPPreChecker:
         self.timeout = timeout
 
     def test_config_tcp(self, proxy: ProxyConfig) -> Tuple[bool, str]:
-        try:
-            start_time = time.time()
+        start_time = time.perf_counter()
+        errors: List[str] = []
 
-            try:
-                server_ip = socket.getaddrinfo(proxy.server, None, socket.AF_INET)[0][4][0]
-            except Exception:
+        try:
+            targets = self._resolve_targets(proxy.server, proxy.port)
+            if not targets:
                 return False, "DNS resolution failed"
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.timeout)
-
-            try:
-                sock.connect((server_ip, proxy.port))
-            except socket.timeout:
-                return False, "TCP timeout"
-            except Exception as e:
-                return False, f"TCP failed: {str(e)[:30]}"
-
-            if proxy.tls or proxy.security in ['tls', 'xtls', 'reality']:
+            for family, sockaddr in targets:
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sock.settimeout(self.timeout)
                 try:
-                    context = ssl.create_default_context()
-                    context.check_hostname = False
-                    context.verify_mode = ssl.CERT_NONE
+                    sock.connect(sockaddr)
+                    if self._needs_tls(proxy):
+                        return self._tls_handshake(sock, proxy, start_time)
 
-                    sni = proxy.sni or proxy.host or proxy.server
-                    with context.wrap_socket(sock, server_hostname=sni) as ssock:
-                        cipher = ssock.cipher()
-                        if not cipher:
-                            return False, "SSL handshake failed"
+                    sock.close()
+                    elapsed = (time.perf_counter() - start_time) * 1000
+                    return True, f"TCP OK - {elapsed:.0f}ms"
+                except socket.timeout:
+                    errors.append("timeout")
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+                except OSError as exc:
+                    errors.append(str(exc))
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
 
-                        if proxy.protocol == 'trojan':
-                            import hashlib
-                            password_hash = hashlib.sha224(proxy.password.encode()).hexdigest() if proxy.password else ""
-                            target = b"\x03\x0bwww.google.com\x01\xbb"
-                            ssock.send(password_hash.encode() + b"\r\n" + target)
-                        elif proxy.protocol == 'vless' and proxy.uuid:
-                            try:
-                                import uuid
-                                uid = uuid.UUID(proxy.uuid).bytes
-                                header = bytes([0]) + uid + bytes([0, 1])
-                                header += bytes([3, 11]) + b"google.com" + struct.pack(">H", 80)
-                                ssock.send(header)
-                            except Exception:
-                                pass
+            if any(err == "timeout" for err in errors):
+                return False, "TCP timeout"
+            if errors:
+                return False, f"TCP failed: {errors[-1][:30]}"
+            return False, "TCP failed"
 
-                        elapsed = (time.time() - start_time) * 1000
-                        return True, f"SSL OK - {elapsed:.0f}ms"
+        except Exception as exc:
+            return False, str(exc)[:40]
 
-                except Exception as e:
-                    return False, f"SSL error: {str(e)[:30]}"
-            else:
+    @staticmethod
+    def _needs_tls(proxy: ProxyConfig) -> bool:
+        if proxy.tls:
+            return True
+        security = (proxy.security or '').lower()
+        return security in _TLS_SECURITY
+
+    def _tls_handshake(self, sock: socket.socket, proxy: ProxyConfig, start_time: float) -> Tuple[bool, str]:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+        sni = proxy.sni or proxy.host or proxy.server
+        try:
+            with context.wrap_socket(sock, server_hostname=sni) as ssock:
+                if not ssock.cipher():
+                    return False, "SSL handshake failed"
+                elapsed = (time.perf_counter() - start_time) * 1000
+                return True, f"SSL OK - {elapsed:.0f}ms"
+        except Exception as exc:
+            try:
                 sock.close()
-                elapsed = (time.time() - start_time) * 1000
-                return True, f"TCP OK - {elapsed:.0f}ms"
+            except Exception:
+                pass
+            return False, f"SSL error: {str(exc)[:30]}"
 
-        except Exception as e:
-            return False, str(e)[:40]
+    def _resolve_targets(self, host: str, port: int) -> List[Tuple[int, Tuple[str, int]]]:
+        try:
+            results = socket.getaddrinfo(
+                host,
+                port,
+                type=socket.SOCK_STREAM,
+            )
+        except socket.gaierror:
+            return []
+
+        targets: List[Tuple[int, Tuple[str, int]]] = []
+        for family, _, _, _, sockaddr in results:
+            if family in (socket.AF_INET, socket.AF_INET6):
+                targets.append((family, sockaddr))
+        return targets
