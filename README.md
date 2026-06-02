@@ -85,17 +85,19 @@ Results are saved to `result.txt` with format:
 ```
 # V2Ray Config Checker Results
 # Generated: 2024-01-15 10:30:45
+# Fetched configs: 1280
+# TCP passed: 240
 # Working configs: 42
+# Phase 1 (TCP): 310.4s
+# Phase 2 (Xray): 480.7s
 # ==================================================
 
-# [VLESS] Latency: 125ms | Config Name
 vless://uuid@server:port?params#name
 
-# [VMESS] Latency: 145ms | Another Config
 vmess://base64encodedconfig
 ```
 
-Configs are sorted by latency (fastest first).
+The header keeps run status and totals; below it, only working config links are written (one per line), sorted by latency.
 
 ## Project Structure
 

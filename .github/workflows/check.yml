@@ -42,7 +42,7 @@ jobs:
 
       - name: Run config checker
         env:
-          V2RAY_MAX_CONFIGS: 3500
+          V2RAY_MAX_CONFIGS: 0
           XRAY_PATH: /usr/local/bin/xray
         run: python v2ray_checker.py
 

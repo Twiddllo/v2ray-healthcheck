@@ -46,6 +46,9 @@ class ConfigCheckerBot:
 
         self.working_configs: List[Tuple[ProxyConfig, float]] = []
         self.tcp_passed_configs: List[ProxyConfig] = []
+        self.total_fetched: int = 0
+        self.phase1_seconds: float = 0.0
+        self.phase2_seconds: float = 0.0
         self.lock = threading.Lock()
 
     def run(self) -> int:
@@ -58,9 +61,11 @@ class ConfigCheckerBot:
         configs = self.source_manager.get_configs_with_fallback()
         if not configs:
             print("No configs fetched from sources")
+            self.total_fetched = 0
             self.save_results()
             return 1
 
+        self.total_fetched = len(configs)
         print(f"\nTotal configs after deduplication: {len(configs)}")
 
         print("\nPhase 1: TCP precheck")
@@ -68,6 +73,7 @@ class ConfigCheckerBot:
         start_phase1 = time.time()
         self.tcp_passed_configs = self._run_tcp_precheck(configs)
         elapsed_phase1 = time.time() - start_phase1
+        self.phase1_seconds = elapsed_phase1
 
         passed_pct = (len(self.tcp_passed_configs) / len(configs)) * 100
         print(
@@ -85,6 +91,7 @@ class ConfigCheckerBot:
         start_phase2 = time.time()
         self._run_xray_validation(self.tcp_passed_configs)
         elapsed_phase2 = time.time() - start_phase2
+        self.phase2_seconds = elapsed_phase2
 
         self.working_configs.sort(key=lambda item: item[1])
         self.save_results()
@@ -162,12 +169,15 @@ class ConfigCheckerBot:
         with open(self.output_file, 'w', encoding='utf-8') as handle:
             handle.write("# V2Ray Config Checker Results\n")
             handle.write(f"# Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n")
+            handle.write(f"# Fetched configs: {self.total_fetched}\n")
+            handle.write(f"# TCP passed: {len(self.tcp_passed_configs)}\n")
             handle.write(f"# Working configs: {len(self.working_configs)}\n")
+            handle.write(f"# Phase 1 (TCP): {self.phase1_seconds:.1f}s\n")
+            handle.write(f"# Phase 2 (Xray): {self.phase2_seconds:.1f}s\n")
             handle.write("#" + "=" * 50 + "\n\n")
 
-            for config, latency in self.working_configs:
-                handle.write(f"# [{config.protocol.upper()}] Latency: {latency:.0f}ms | {config.name}\n")
-                handle.write(f"{config.raw_config}\n\n")
+            for config, _ in self.working_configs:
+                handle.write(f"{config.raw_config}\n")
 
 
 def main() -> None:
