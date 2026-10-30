@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
-
 import json
 import os
+import signal
 import socket
 import struct
 import subprocess
@@ -170,11 +169,13 @@ class XrayConfigBuilder:
 
 
 class XrayValidator:
-    def __init__(self, xray_path: str = "xray", startup_delay: float = 0.6):
+    def __init__(self, xray_path: str = "xray", startup_delay: float = 0.25):
         self.xray_path = xray_path
         self.startup_delay = startup_delay
-        self.timeout = 12
-        self.startup_timeout = 5.0
+        # All wall-clock limits are tunable from CI so the whole phase can be
+        # fitted into the workflow time budget.
+        self.timeout = float(os.environ.get('XRAY_TEST_TIMEOUT', '10'))
+        self.startup_timeout = float(os.environ.get('XRAY_STARTUP_TIMEOUT', '4'))
 
     def test_config_with_xray(self, proxy: ProxyConfig) -> Tuple[bool, float]:
         process = None
@@ -198,6 +199,8 @@ class XrayValidator:
             }
             if os.name == 'nt':
                 popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+            else:
+                popen_kwargs['start_new_session'] = True
 
             process = subprocess.Popen(
                 [self.xray_path, 'run', '-c', config_path],
@@ -214,16 +217,42 @@ class XrayValidator:
             return False, -1.0
         finally:
             if process is not None:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                self._stop_process(process)
             if config_path:
                 try:
                     os.unlink(config_path)
                 except OSError:
                     pass
+
+    @staticmethod
+    def _stop_process(process: subprocess.Popen) -> None:
+        try:
+            if os.name == 'nt':
+                process.terminate()
+            else:
+                # start_new_session=True made xray a group leader, so its
+                # group id equals its pid.
+                os.killpg(process.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                if os.name == 'nt':
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
 
     def _find_free_port(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
