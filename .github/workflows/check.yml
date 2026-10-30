@@ -2,8 +2,7 @@ name: V2Ray Config Check
 
 on:
   schedule:
-  # Every 25 minutes
-    - cron: '*/25 * * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -16,7 +15,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
 
     steps:
       - name: Checkout repository
@@ -42,8 +41,16 @@ jobs:
 
       - name: Run config checker
         env:
-          V2RAY_MAX_CONFIGS: 0
+          V2RAY_MAX_CONFIGS: '0'
+          V2RAY_DEADLINE_SECONDS: '2700'
+          V2RAY_TCP_WORKERS: '128'
+          V2RAY_TCP_TIMEOUT: '5'
+          V2RAY_XRAY_WORKERS: '8'
           XRAY_PATH: /usr/local/bin/xray
+          XRAY_STARTUP_DELAY: '0.25'
+          XRAY_STARTUP_TIMEOUT: '4'
+          XRAY_TEST_TIMEOUT: '10'
+          PYTHONUNBUFFERED: '1'
         run: python v2ray_checker.py
 
       - name: Commit updated results
@@ -64,4 +71,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add result.txt
           git commit -m "chore: update working configs [skip ci]"
+          # Resync in case another run committed in the meantime,
+          # then push. Keep the newer remote list on conflict.
+          git pull --rebase -X theirs --autostash origin "${GITHUB_REF_NAME:-main}"
           git push
