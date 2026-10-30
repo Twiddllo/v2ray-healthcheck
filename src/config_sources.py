@@ -19,6 +19,7 @@ class ConfigSourceManager:
         "https://raw.githubusercontent.com/barry-far/V2ray-Config/refs/heads/main/Splitted-By-Protocol/trojan.txt",
         "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt",
         "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/main/V2Ray-Config-By-EbraSha.txt",
+        "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/refs/heads/main/fast/configs.txt",
     ]
 
     def __init__(self, timeout: float = 30.0, max_configs: int = 0):
